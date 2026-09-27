@@ -96,7 +96,7 @@ export const COMPRESS_PARAMETERS = {
     },
     content: {
       description:
-        "One or more ranges to compress into separate summary blocks. Array form (preferred): one entry per range — line form (one STRING per range: first line 'm00150–m00220 optional topic', remaining lines the markdown summary verbatim) or object form {startId,endId,summary,topic?}. String form also accepted: bare line-form text, or a JSON-encoded array of ranges (some gateways stringify arrays). REQUIRED unless the flat single-range form is used.",
+        "One or more ranges to compress into separate summary blocks. Array form: one entry per range — line form (one STRING per range: first line 'm00150–m00220 optional topic', remaining lines the markdown summary verbatim) or object form {startId,endId,summary,topic?}. Single-string form (PREFERRED for multi-range batches — plain text survives lossy gateways best): ONE plain string holding ALL ranges, each block starting with its 'm00150–m00220 optional topic' header line followed by that block's summary. A JSON-encoded array of ranges as that string is also accepted (some gateways stringify arrays). Batch multiple ranges into ONE call — do not split into one call per range. REQUIRED unless the flat single-range form is used.",
       anyOf: [
         {
           type: "array",
@@ -105,7 +105,7 @@ export const COMPRESS_PARAMETERS = {
               {
                 type: "string",
                 description:
-                  "Line form: first line 'm00150–m00220 optional topic', remaining lines the summary markdown, verbatim (no JSON escaping)",
+                  "Line form: first line 'm00150–m00220 optional topic', remaining lines the summary markdown, verbatim (no JSON escaping). A single string may carry MULTIPLE ranges — each block starts with its own refs header line",
               },
               {
                 ...COMPRESS_RANGE_OBJECT,
@@ -150,7 +150,7 @@ export const COMPRESS_PARAMETERS = {
 export const COMPRESS_TOOL = {
   name: COMPRESS_TOOL_NAME,
   description:
-    "Replace consumed conversation ranges with self-contained summaries you write, identified by their refs. Line form (preferred): content = one STRING per range — first line 'm00150–m00220 optional topic', remaining lines the markdown summary written verbatim (no JSON structure, no escaping). Also accepted: object entries {startId,endId,summary,topic?} in the content array, content as a single string (bare line form or JSON-encoded array), and a flat single-range call {startId,endId,summary,topic?} without content. Use when content is genuinely consumed. REQUIRED — compress without content or flat range fields is invalid.",
+    "Replace consumed conversation ranges with self-contained summaries you write, identified by their refs. Line form (preferred): content = one STRING per range — first line 'm00150–m00220 optional topic', remaining lines the markdown summary written verbatim (no JSON structure, no escaping). Also accepted: object entries {startId,endId,summary,topic?} in the content array, content as a single string (bare line form — one string may hold ALL ranges, each block starting with its refs header line — or JSON-encoded array), and a flat single-range call {startId,endId,summary,topic?} without content. Batch multiple ranges into ONE call. Use when content is genuinely consumed. REQUIRED — compress without content or flat range fields is invalid.",
   input_schema: COMPRESS_PARAMETERS,
 };
 

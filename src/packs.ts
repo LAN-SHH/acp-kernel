@@ -181,7 +181,7 @@ const LEAN_TOOL_PROMPTS: ToolPrompts = {
       "Replace consumed conversation ranges with self-contained summaries using mNNNNN or bN refs.",
     paramDescriptions: {
       content:
-        "One string per range: first line 'm00150–m00220 optional topic', remaining lines the summary markdown. Object form also accepted.",
+        "One string per range: first line 'm00150–m00220 optional topic', remaining lines the summary markdown; ONE string may hold several ranges (new header line per range). Object form also accepted.",
       startId: "Inclusive first mNNNNN or bN ref.",
       endId: "Inclusive last mNNNNN or bN ref.",
       summary: "Self-contained replacement preserving exact technical details.",
