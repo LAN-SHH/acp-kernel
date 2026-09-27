@@ -17,6 +17,7 @@ import {
   normalizeHead,
   extractCommand,
   buildStoredPlaceholder,
+  parseStoredPlaceholder,
   isStoredPlaceholderText,
   retrievedMessageId,
   isRetrievedMessage,
@@ -25,6 +26,7 @@ import {
   storeLargeResults,
   storeCoveredOriginals,
   noteRetrieval,
+  type StoredPlaceholderInput,
 } from "../src/ccr.js";
 import { createCore } from "../src/compress.js";
 import { createInitialState } from "../src/state.js";
@@ -863,13 +865,17 @@ test("RETRIEVE_TOOL schemas exist in all three wire shapes and stay opt-in", () 
 
 test("storeCoveredOriginals never persists placeholder text as an original (#1340)", () => {
   const core = createCore({ countTokens });
-  // The exact disease: history still carries the [acp-stored …] placeholder,
-  // but the companion store LOST the ref (fork without store adoption, deleted
-  // or corrupted store file, host migration without the envelope). Storing the
-  // placeholder bytes as the "original" would make every later retrieve-by-ref
-  // a fake hit that echoes the placeholder itself.
+  // The exact disease: history still carries the [acp-stored …] placeholder
+  // for THIS message's own ref, but the companion store LOST the entry (fork
+  // without store adoption, deleted or corrupted store file, host migration
+  // without the envelope). CCR replacement always cites the hosting message's
+  // own ref, so the faithful fixture is self-citing; storing those bytes as
+  // the "original" would make every later retrieve-by-ref a fake hit echoing
+  // the placeholder itself. (#1456) Placeholder-shaped text citing a FOREIGN
+  // ref no longer matches this gate — it stores as a genuine original
+  // (covered by a dedicated test below).
   const placeholder = buildStoredPlaceholder({
-    ref: "m00099",
+    ref: "m00001",
     kind: "tool:bash",
     tokens: 4213,
     head: "probe_kvnet.py: tests n-gram baseline",
@@ -933,4 +939,348 @@ test("storeCoveredOriginals never persists placeholder text as an original (#134
   const kept = retrieveByRef(store, "m00002");
   assert.ok(kept.ok, "non-placeholder covered originals still store normally");
   if (kept.ok) assert.equal(kept.text, "assistant reply that folds alongside");
+});
+
+// billion-context#1456 — the former includes("[acp-stored") detector
+// misclassified ANY text merely mentioning the marker (source defining it,
+// docs quoting an example) as an internal placeholder, so such content
+// escaped arrival storage, fold-time archiving and absorb. These tests pin
+// the strict whole-body parser and all three affected paths.
+
+function canonicalExample(): string {
+  return buildStoredPlaceholder({
+    ref: "m00423",
+    kind: "shell output",
+    tokens: 4213,
+    head: "npm run build",
+    command: "npm run build",
+    retrieveToolName: RETRIEVE_TOOL_NAME,
+  });
+}
+
+function docWithEmbeddedExample(): string {
+  return (
+    "This document explains CCR.\n\nExample placeholder:\n" +
+    canonicalExample() +
+    "\n\n" +
+    "ordinary documentation content\n".repeat(5000)
+  );
+}
+
+function sourceDefiningMarker(): string {
+  const block =
+    "export function classifyKind(toolName?: string): string {\n" +
+    '  if (!toolName) return "tool result";\n' +
+    '  return KIND_LABELS[toolName.toLowerCase()] ?? "tool result";\n' +
+    "}\n";
+  return (
+    "// src/ccr.ts\n" +
+    'export const STORED_PLACEHOLDER_MARKER = "[acp-stored";\n' +
+    block.repeat(500)
+  );
+}
+
+test("parseStoredPlaceholder round-trips every buildStoredPlaceholder shape", () => {
+  const cases: StoredPlaceholderInput[] = [
+    {
+      ref: "m00042",
+      kind: "shell output",
+      tokens: 4213,
+      head: "head preview",
+      command: "npm run build",
+      retrieveToolName: RETRIEVE_TOOL_NAME,
+    },
+    {
+      ref: "m00001",
+      kind: "tool result",
+      tokens: 7,
+      head: "tiny",
+      retrieveToolName: RETRIEVE_TOOL_NAME,
+    },
+    {
+      ref: "m99999",
+      kind: "file read",
+      tokens: 123456,
+      head: "long file",
+      retrieveToolName: "custom_retrieve",
+    },
+    {
+      ref: "m00007",
+      kind: "web fetch",
+      tokens: 999,
+      head: "title with `backticks` inside",
+      retrieveToolName: RETRIEVE_TOOL_NAME,
+    },
+    {
+      ref: "m00008",
+      kind: "kind·with·dots",
+      tokens: 100,
+      head: "h",
+      retrieveToolName: "a.b-c_d",
+    },
+  ];
+  for (const input of cases) {
+    const text = buildStoredPlaceholder(input);
+    const parsed = parseStoredPlaceholder(text);
+    assert.ok(parsed, `round-trip failed for ${JSON.stringify(input)}`);
+    assert.equal(parsed.ref, input.ref);
+    assert.equal(parsed.kind, input.kind);
+    assert.equal(parsed.tokens, input.tokens);
+    assert.equal(parsed.retrieveToolName, input.retrieveToolName);
+    assert.equal(parsed.title, input.command ?? input.head);
+    assert.equal(isStoredPlaceholderText(text), true);
+  }
+});
+
+test("parseStoredPlaceholder rejects marker mentions inside ordinary text (#1456)", () => {
+  const canonical = canonicalExample();
+  const negatives: Array<[string, string]> = [
+    ["embedded full example in a doc", docWithEmbeddedExample()],
+    ["source defining the marker constant", sourceDefiningMarker()],
+    ["business text before", `prefix line\n${canonical}`],
+    ["business text after", `${canonical}\nsuffix line`],
+    ["third line", `${canonical}\nextra line`],
+    ["wrong arrow glyph", canonical.replace("→", "->")],
+    ["two-space indent", canonical.replace("\n   →", "\n  →")],
+    [
+      "wrong trailing phrase",
+      canonical.replace("returns the full text", "returns everything"),
+    ],
+    [
+      "six-digit ref on both lines",
+      canonical
+        .replace("#m00423 ·", "#m004234 ·")
+        .replace('("m00423")', '("m004234")'),
+    ],
+    [
+      "ungrouped four-digit token count",
+      canonical.replace("4,213 tok", "4213 tok"),
+    ],
+    ["missing box glyph", canonical.replace("📦 ", "")],
+    ["CRLF line break", canonical.replace("\n", "\r\n")],
+  ];
+  for (const [label, text] of negatives) {
+    assert.equal(parseStoredPlaceholder(text), null, label);
+    assert.equal(isStoredPlaceholderText(text), false, label);
+  }
+});
+
+test("parseStoredPlaceholder accepts trailing newline and one leading render tag", () => {
+  const canonical = canonicalExample();
+  const withNewline = parseStoredPlaceholder(canonical + "\n");
+  assert.ok(withNewline);
+  assert.equal(withNewline.ref, "m00423");
+  const tagged = `<acp tokens="2" type="tool">m00042</acp>\n${canonical}`;
+  const parsed = parseStoredPlaceholder(tagged);
+  assert.ok(parsed);
+  assert.equal(parsed.ref, "m00423");
+});
+
+test("parseStoredPlaceholder rejects cross-line ref mismatch", () => {
+  const mismatched = canonicalExample().replace('("m00423")', '("m00424")');
+  assert.equal(parseStoredPlaceholder(mismatched), null);
+});
+
+test("storeLargeResults stores and replaces ordinary docs embedding placeholder examples (#1456)", () => {
+  const original = docWithEmbeddedExample();
+  const messages = [
+    toolCall("c1", "call1", "read"),
+    toolResult("r1", "call1", "read", original),
+  ];
+  const state = { ...createInitialState(), messageRefs: refsFor(messages) };
+  const result = storeLargeResults({
+    messages,
+    state,
+    store: createContentStore(),
+    config: ccrConfig(),
+    countTokens,
+  });
+  assert.equal(result.storedCount, 1);
+  const replaced = result.messages[1]!.text ?? "";
+  assert.notEqual(replaced, original);
+  assert.ok(isStoredPlaceholderText(replaced));
+  assert.ok(replaced.includes("#m00002"));
+  const found = retrieveByRef(result.store, "m00002");
+  assert.ok(found.ok);
+  if (found.ok) assert.equal(found.text, original);
+});
+
+test("storeLargeResults treats source code defining the marker as ordinary content (#1456)", () => {
+  const original = sourceDefiningMarker();
+  const messages = [
+    toolCall("c1", "call1", "read"),
+    toolResult("r1", "call1", "read", original),
+  ];
+  const state = { ...createInitialState(), messageRefs: refsFor(messages) };
+  const result = storeLargeResults({
+    messages,
+    state,
+    store: createContentStore(),
+    config: ccrConfig(),
+    countTokens,
+  });
+  assert.equal(result.storedCount, 1);
+  assert.notEqual(result.messages[1]!.text, original);
+  const found = retrieveByRef(result.store, "m00002");
+  assert.ok(found.ok);
+  if (found.ok) assert.equal(found.text, original);
+});
+
+test("storeCoveredOriginals archives ordinary originals embedding marker examples (#1456)", () => {
+  const core = createCore({ countTokens });
+  const original = docWithEmbeddedExample();
+  const messages: CoreMessage[] = [
+    { id: "u1", role: "user", contentType: "text", text: original },
+    {
+      id: "a1",
+      role: "assistant",
+      contentType: "text",
+      text: "assistant reply that folds alongside",
+    },
+    {
+      id: "u2",
+      role: "user",
+      contentType: "text",
+      text: "recent tail user message",
+    },
+    {
+      id: "a2",
+      role: "assistant",
+      contentType: "text",
+      text: "recent tail assistant reply",
+    },
+  ];
+  const seeded = core.processTurn({
+    messages,
+    state: createInitialState(),
+    config: defaultConfig(100000),
+    tokenCount: 1000,
+  });
+  const compressed = core.applyCompression({
+    ranges: [{ startRef: "m00001", endRef: "m00002", summary: "S".repeat(60) }],
+    messages: seeded.messages,
+    state: seeded.state,
+    config: defaultConfig(100000, {
+      compress: { minCompressRange: 0 },
+      preserveRecentMessages: 1,
+      preserveRecentTokens: 0,
+    }),
+  });
+  const block = compressed.state.blocks.find((b) => b.active)!;
+  let store = createContentStore();
+  store = storeCoveredOriginals(
+    store,
+    seeded.messages,
+    compressed.state,
+    [block.blockId],
+    countTokens,
+  );
+  const found = retrieveByRef(store, "m00001");
+  assert.ok(
+    found.ok,
+    "ordinary doc embedding a placeholder example must be archived",
+  );
+  if (found.ok) assert.equal(found.text, original);
+});
+
+test("storeCoveredOriginals stores foreign-ref placeholder-shaped text as a genuine original (#1456)", () => {
+  const core = createCore({ countTokens });
+  // Placeholder-shaped bytes citing a ref that is NOT this message's own ref
+  // (model/user echoed a placeholder into new content): those bytes ARE this
+  // message's true original — archiving them under its own ref is honest, and
+  // the cited foreign ref never gains a fake hit.
+  const foreign = buildStoredPlaceholder({
+    ref: "m00099",
+    kind: "shell output",
+    tokens: 4213,
+    head: "echoed placeholder",
+    retrieveToolName: RETRIEVE_TOOL_NAME,
+  });
+  const messages: CoreMessage[] = [
+    { id: "u1", role: "user", contentType: "text", text: foreign },
+    {
+      id: "a1",
+      role: "assistant",
+      contentType: "text",
+      text: "assistant reply that folds alongside",
+    },
+    {
+      id: "u2",
+      role: "user",
+      contentType: "text",
+      text: "recent tail user message",
+    },
+    {
+      id: "a2",
+      role: "assistant",
+      contentType: "text",
+      text: "recent tail assistant reply",
+    },
+  ];
+  const seeded = core.processTurn({
+    messages,
+    state: createInitialState(),
+    config: defaultConfig(100000),
+    tokenCount: 1000,
+  });
+  const compressed = core.applyCompression({
+    ranges: [{ startRef: "m00001", endRef: "m00002", summary: "S".repeat(60) }],
+    messages: seeded.messages,
+    state: seeded.state,
+    config: defaultConfig(100000, {
+      compress: { minCompressRange: 0 },
+      preserveRecentMessages: 1,
+      preserveRecentTokens: 0,
+    }),
+  });
+  const block = compressed.state.blocks.find((b) => b.active)!;
+  let store = createContentStore();
+  store = storeCoveredOriginals(
+    store,
+    seeded.messages,
+    compressed.state,
+    [block.blockId],
+    countTokens,
+  );
+  const found = retrieveByRef(store, "m00001");
+  assert.ok(
+    found.ok,
+    "foreign-ref placeholder-shaped text is ordinary content",
+  );
+  if (found.ok) assert.equal(found.text, foreign);
+  const cited = retrieveByRef(store, "m00099");
+  assert.ok(!cited.ok, "the cited foreign ref must never gain a fake hit");
+});
+
+test("absorb candidates: marker mentions no longer exclude ordinary results (#1456)", () => {
+  const config = defaultConfig(100000, {
+    absorb: { ...DEFAULT_ABSORB_CONFIG, enabled: true },
+  });
+  const docMsg: CoreMessage = {
+    id: "r1",
+    role: "tool",
+    contentType: "tool-result",
+    toolName: "bash",
+    toolCallId: "call1",
+    text: docWithEmbeddedExample(),
+  };
+  const srcMsg: CoreMessage = {
+    id: "r2",
+    role: "tool",
+    contentType: "tool-result",
+    toolName: "bash",
+    toolCallId: "call2",
+    text: sourceDefiningMarker(),
+  };
+  const phMsg: CoreMessage = {
+    id: "r3",
+    role: "tool",
+    contentType: "tool-result",
+    toolName: "bash",
+    toolCallId: "call3",
+    text: canonicalExample(),
+  };
+  assert.equal(isAbsorbCandidate(docMsg, config), true);
+  assert.equal(isAbsorbCandidate(srcMsg, config), true);
+  assert.equal(isAbsorbCandidate(phMsg, config), false);
 });
