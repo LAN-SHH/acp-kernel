@@ -41,6 +41,9 @@ export interface StoredEntry {
   chars: number;
   /** Deterministic head preview embedded in the placeholder. */
   head: string;
+  /** Call subject (command/path/query) frozen at arrival, if extractable —
+   *  needed to re-project a byte-identical placeholder on raw retransmission. */
+  command?: string;
 }
 
 export interface MessageContentStore {
@@ -59,6 +62,7 @@ export interface StoreSpec {
   toolName?: string;
   tokens: number;
   head: string;
+  command?: string;
 }
 
 export function createContentStore(): MessageContentStore {
@@ -87,6 +91,7 @@ export function storeOriginal(
     head: spec.head,
   };
   if (spec.toolName !== undefined) entry.toolName = spec.toolName;
+  if (spec.command !== undefined) entry.command = spec.command;
   const byHash =
     store.byHash[hash] === undefined
       ? { ...store.byHash, [hash]: spec.text }

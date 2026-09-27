@@ -19,6 +19,7 @@ import {
   buildStoredPlaceholder,
   parseStoredPlaceholder,
   isStoredPlaceholderText,
+  restoreStoredPlaceholderText,
   retrievedMessageId,
   isRetrievedMessage,
   buildRetrievalInjection,
@@ -43,6 +44,7 @@ import {
   ACP_TOOL_NAMES,
 } from "../src/compress-tools.js";
 import type { Config, CoreMessage } from "../src/types.js";
+import type { StoredEntry } from "../src/content-store.js";
 
 const countTokens = (text: string) => Math.ceil(text.length / 4);
 
@@ -350,6 +352,247 @@ test("storeLargeResults: idempotent on already-replaced text", () => {
   assert.equal(second.storedCount, 0);
   assert.deepEqual(second.messages, first.messages);
   assert.deepEqual(second.store, first.store);
+});
+
+test("storeLargeResults: raw retransmission of a stored ref re-projects the arrival placeholder byte-identically", () => {
+  const original = bigText();
+  const messages = [
+    toolCall("c1", "call1"),
+    toolResult("r1", "call1", "bash", original),
+  ];
+  const state = { ...createInitialState(), messageRefs: refsFor(messages) };
+  const first = storeLargeResults({
+    messages,
+    state,
+    store: createContentStore(),
+    config: ccrConfig(),
+    countTokens,
+  });
+  assert.equal(first.storedCount, 1);
+  const placeholder = first.messages[1]!.text!;
+  const second = storeLargeResults({
+    messages: [
+      toolCall("c1", "call1"),
+      toolResult("r1", "call1", "bash", original),
+    ],
+    state,
+    store: first.store,
+    config: ccrConfig(),
+    countTokens,
+  });
+  assert.equal(second.storedCount, 0);
+  assert.deepEqual(second.store, first.store);
+  assert.equal(second.messages[1]!.text, placeholder);
+  assert.ok(isStoredPlaceholderText(second.messages[1]!.text ?? ""));
+});
+
+test("processTurn: raw retransmission keeps the wire byte-stable across turns (#1460)", () => {
+  const core = createCore({ countTokens });
+  const turn1 = core.processTurn({
+    messages: sessionWithBigBash(),
+    state: createInitialState(),
+    config: ccrConfig(),
+    tokenCount: 1000,
+  });
+  const placeholderTurn1 = turn1.messages[3]!.text!;
+  const followUp: CoreMessage = {
+    id: "u2",
+    role: "user",
+    contentType: "text",
+    text: "did it work?",
+  };
+  const turn2 = core.processTurn({
+    messages: [...sessionWithBigBash(), followUp],
+    state: turn1.state,
+    config: ccrConfig(),
+    tokenCount: 1200,
+    contentStore: turn1.contentStore,
+  });
+  assert.equal(turn2.messages[3]!.text, placeholderTurn1);
+  assert.equal(turn2.state.stats.storedCount, 1);
+  assert.deepEqual(turn2.contentStore, turn1.contentStore);
+});
+
+test("storeLargeResults: re-sent raw bytes below threshold still re-project the stored placeholder", () => {
+  const original = bigText();
+  const messages = [
+    toolCall("c1", "call1"),
+    toolResult("r1", "call1", "bash", original),
+  ];
+  const state = { ...createInitialState(), messageRefs: refsFor(messages) };
+  const first = storeLargeResults({
+    messages,
+    state,
+    store: createContentStore(),
+    config: ccrConfig(),
+    countTokens,
+  });
+  const second = storeLargeResults({
+    messages: [
+      toolCall("c1", "call1"),
+      toolResult("r1", "call1", "bash", "partial output"),
+    ],
+    state,
+    store: first.store,
+    config: ccrConfig(),
+    countTokens,
+  });
+  assert.equal(second.storedCount, 0);
+  assert.equal(second.messages[1]!.text, first.messages[1]!.text);
+});
+
+test("storeOriginal persists the call subject for placeholder re-projection", () => {
+  let store = createContentStore();
+  store = storeOriginal(store, {
+    ref: "m00042",
+    rawId: "h_raw1",
+    text: "hello world",
+    kind: "shell output",
+    toolName: "bash",
+    tokens: 3,
+    head: "hello world",
+    command: "npm run build",
+  });
+  const found = retrieveByRef(store, "m00042");
+  assert.ok(found.ok);
+  if (found.ok) assert.equal(found.entry.command, "npm run build");
+});
+
+test("restoreStoredPlaceholderText reproduces the arrival placeholder from frozen entry fields", () => {
+  const entry: StoredEntry = {
+    hash: "h",
+    rawId: "r",
+    kind: "shell output",
+    tokens: 4213,
+    chars: 99,
+    head: "some preview",
+    command: "npm run build",
+  };
+  assert.equal(
+    restoreStoredPlaceholderText(
+      "m00423",
+      entry,
+      "acp_retrieve",
+      undefined,
+      96,
+    ),
+    buildStoredPlaceholder({
+      ref: "m00423",
+      kind: "shell output",
+      tokens: 4213,
+      head: "some preview",
+      command: "npm run build",
+      retrieveToolName: "acp_retrieve",
+    }),
+  );
+});
+
+test("storeLargeResults: legacy entries without a persisted command fall back to args, then head", () => {
+  const original = bigText();
+  const messages = [
+    toolCall("c1", "call1"),
+    toolResult("r1", "call1", "bash", original),
+  ];
+  const state = { ...createInitialState(), messageRefs: refsFor(messages) };
+  const tokens = countTokens(original);
+  const head = normalizeHead(original, DEFAULT_CCR_CONFIG.maxHeadChars);
+  let legacyStore = createContentStore();
+  legacyStore = storeOriginal(legacyStore, {
+    ref: "m00002",
+    rawId: "r1",
+    text: original,
+    kind: "shell output",
+    toolName: "bash",
+    tokens,
+    head,
+  });
+  delete legacyStore.byRef["m00002"]!.command;
+  const withArgs = storeLargeResults({
+    messages,
+    state,
+    store: legacyStore,
+    config: ccrConfig(),
+    countTokens,
+  });
+  assert.equal(withArgs.storedCount, 0);
+  assert.equal(
+    withArgs.messages[1]!.text,
+    buildStoredPlaceholder({
+      ref: "m00002",
+      kind: "shell output",
+      tokens,
+      head,
+      command: "run call1",
+      retrieveToolName: "acp_retrieve",
+    }),
+  );
+  const noArgsCall: CoreMessage = {
+    id: "c1",
+    role: "assistant",
+    contentType: "tool-call",
+    toolName: "bash",
+    toolCallId: "call1",
+    text: "not json {",
+  };
+  const withoutArgs = storeLargeResults({
+    messages: [noArgsCall, toolResult("r1", "call1", "bash", original)],
+    state,
+    store: legacyStore,
+    config: ccrConfig(),
+    countTokens,
+  });
+  assert.equal(
+    withoutArgs.messages[1]!.text,
+    buildStoredPlaceholder({
+      ref: "m00002",
+      kind: "shell output",
+      tokens,
+      head,
+      retrieveToolName: "acp_retrieve",
+    }),
+  );
+});
+
+test("storeCoveredOriginals persists the call subject for tool results", () => {
+  const core = createCore({ countTokens });
+  const original = bigText();
+  const messages: CoreMessage[] = [
+    toolCall("c1", "call1", "bash"),
+    toolResult("r1", "call1", "bash", original),
+    {
+      id: "u2",
+      role: "user",
+      contentType: "text",
+      text: "recent tail user message",
+    },
+  ];
+  const seeded = core.processTurn({
+    messages,
+    state: createInitialState(),
+    config: defaultConfig(100000),
+    tokenCount: 1000,
+  });
+  const compressed = core.applyCompression({
+    ranges: [{ startRef: "m00001", endRef: "m00003", summary: "S".repeat(60) }],
+    messages: seeded.messages,
+    state: seeded.state,
+    config: defaultConfig(100000, { compress: { minCompressRange: 0 } }),
+  });
+  const block = compressed.state.blocks.find((b) => b.active)!;
+  let store = createContentStore();
+  store = storeCoveredOriginals(
+    store,
+    seeded.messages,
+    compressed.state,
+    [block.blockId],
+    countTokens,
+  );
+  const found = retrieveByRef(store, "m00002");
+  assert.ok(found.ok);
+  if (found.ok) {
+    assert.equal(found.text, original);
+    assert.equal(found.entry.command, "run call1");
+  }
 });
 
 test("storeLargeResults: ACP tools, own retrieve tool, excludeTools, protected tools are skipped", () => {

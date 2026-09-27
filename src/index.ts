@@ -191,6 +191,7 @@ export {
   buildStoredPlaceholder,
   parseStoredPlaceholder,
   isStoredPlaceholderText,
+  restoreStoredPlaceholderText,
   retrievedMessageId,
   isRetrievedMessage,
   buildRetrievalInjection,

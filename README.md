@@ -143,7 +143,10 @@ friendly):
 Contract guarantees:
 
 - **Replace-once-at-arrival.** The visible bytes change exactly once
-  (original → placeholder); every later turn sees identical bytes.
+  (original → placeholder); every later turn sees identical bytes. If a host
+  re-sends the original raw (raw retransmission), the node re-projects the
+  arrival-time placeholder instead of leaking the raw payload back onto the
+  wire, so the byte-stable guarantee holds across re-sends too (#1460).
 - **Tool-pair integrity.** Only the tool-result's own content shrinks; the
   paired assistant `tool_calls` survive untouched (OpenAI-family wire pairing).
 - **id-never-reused safe.** The store is per-ref append-only, first-write-wins,

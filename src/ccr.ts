@@ -7,7 +7,7 @@ import type {
 import { refForRaw, BLOCKED_REF } from "./refs.js";
 import { ACP_TOOL_NAMES } from "./compress-tools.js";
 import { isMessageProtected, matchToolPattern } from "./protected.js";
-import { hasStoredRef, retrieveByRef, storeOriginal } from "./content-store.js";
+import { retrieveByRef, storeOriginal } from "./content-store.js";
 import type {
   MessageContentStore,
   RetrieveResult,
@@ -26,9 +26,11 @@ import type { NodeIO, PipelineContext, PipelineNode } from "./pipeline.js";
  * retrieved text rides back as an ephemeral trailing message that never
  * consumes a ref and never enters the fold space.
  *
- * Replace-once-at-arrival: the pipeline node only acts on results it has not
- * stored yet (marker check + store lookup). After replacement the visible
- * bytes never change again → prefix-cache stable.
+ * Replace-once-at-arrival: after the first replacement the visible bytes
+ * never change again → prefix-cache stable. The node enforces this even when
+ * a host re-sends the original raw (raw retransmission): a stored ref meeting
+ * its raw bytes again gets the arrival-time placeholder re-projected instead
+ * of leaking the raw payload back onto the wire (#1460).
  */
 
 export const RETRIEVE_TOOL_NAME = "acp_retrieve";
@@ -276,6 +278,28 @@ export function buildRetrievalInjection(
   };
 }
 
+/** Re-project the arrival-time placeholder for a stored ref whose original
+ *  bytes arrived again raw (host retransmission). Frozen entry fields keep
+ *  the wire byte-stable; entries persisted before `command` existed fall back
+ *  to re-extracting from the paired call args, then to the head preview —
+ *  matching what arrival produced in each case (#1460). */
+export function restoreStoredPlaceholderText(
+  ref: string,
+  entry: StoredEntry,
+  retrieveToolName: string,
+  callArgsText: string | undefined,
+  maxHeadChars: number,
+): string {
+  return buildStoredPlaceholder({
+    ref,
+    kind: entry.kind,
+    tokens: entry.tokens,
+    head: entry.head,
+    command: entry.command ?? extractCommand(callArgsText, maxHeadChars),
+    retrieveToolName,
+  });
+}
+
 export interface ApplyRetrieveInput {
   store: MessageContentStore;
   ref: string;
@@ -374,10 +398,22 @@ export function storeLargeResults(
       return message;
     }
     if (isMessageProtected(message, input.config)) return message;
+    if (!ref || ref === BLOCKED_REF) return message;
+    const existing = current.byRef[ref];
+    if (existing) {
+      return {
+        ...message,
+        text: restoreStoredPlaceholderText(
+          ref,
+          existing,
+          cfg.toolName,
+          callById.get(message.toolCallId)?.text,
+          cfg.maxHeadChars,
+        ),
+      };
+    }
     const tokens = input.countTokens(text);
     if (tokens < cfg.minToolTokens) return message;
-    if (!ref || ref === BLOCKED_REF) return message;
-    if (hasStoredRef(current, ref)) return message;
     const kind = classifyKind(toolName);
     const head = normalizeHead(text, cfg.maxHeadChars);
     const command = extractCommand(
@@ -469,6 +505,12 @@ export function storeCoveredOriginals(
     for (const id of block.effectiveMessageIds) covered.add(id);
   }
   let current = store;
+  const callArgsById = new Map<string, string>();
+  for (const message of messages) {
+    if (message.contentType === "tool-call" && message.toolCallId) {
+      callArgsById.set(message.toolCallId, stripLeadingTag(message.text ?? ""));
+    }
+  }
   for (const message of messages) {
     if (!covered.has(message.id)) continue;
     if (message.contentType === "reasoning") continue;
@@ -495,6 +537,10 @@ export function storeCoveredOriginals(
       toolName: message.toolName,
       tokens: countTokens(text),
       head: normalizeHead(text, maxHeadChars),
+      command:
+        message.contentType === "tool-result" && message.toolCallId
+          ? extractCommand(callArgsById.get(message.toolCallId), maxHeadChars)
+          : undefined,
     });
   }
   return current;
