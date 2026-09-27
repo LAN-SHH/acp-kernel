@@ -428,6 +428,7 @@ export function storeLargeResults(
       toolName,
       tokens,
       head,
+      command,
     });
     storedCount += 1;
     return {

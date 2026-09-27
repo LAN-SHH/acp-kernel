@@ -369,6 +369,7 @@ test("storeLargeResults: raw retransmission of a stored ref re-projects the arri
     countTokens,
   });
   assert.equal(first.storedCount, 1);
+  assert.equal(first.store.byRef["m00002"]?.command, "run call1");
   const placeholder = first.messages[1]!.text!;
   const second = storeLargeResults({
     messages: [
