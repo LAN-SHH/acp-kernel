@@ -37,9 +37,9 @@ const state = createInitialState();
 const config = defaultConfig(200000); // modelContextLimit (positional); optional overrides as 2nd arg
 
 // processTurn runs the canonical node pipeline every turn:
-// assign-refs → sync-blocks → prune → ccr-store → absorb-hide → crush →
-// absorb-prompt → filter → hide-compress-calls → recommend → nudge-inject
-// → emergency-truncate → render-refs
+// reconcile-live-ids → assign-refs → sync-blocks → prune → ccr-store →
+// absorb-hide → crush → absorb-prompt → filter → hide-compress-calls →
+// recommend → nudge-inject → emergency-truncate → render-refs
 const {
   messages,
   state: nextState,
