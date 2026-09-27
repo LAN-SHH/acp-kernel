@@ -15,38 +15,40 @@ function clusterRoot(id: string): string | null {
 
 /**
  * Re-mint live messages whose id collides with an already-FOLDED copy of the same
- * content (billion-context #1476). Runs as the FIRST pipeline node, before
- * assign-refs and prune, so the re-minted id is what gets ref'd and what prune sees.
+ * content (billion-context #1476), WITHOUT un-covering the folded originals' own
+ * resends (#462). Runs as the FIRST pipeline node, before assign-refs and prune,
+ * so the re-minted id is what gets ref'd and what prune sees.
  *
- * Root cause: deriveMessageId's cluster counter restarts every conversion pass, so
- * text re-sent after its earlier copy was folded re-derives the SAME bare `h_…` id.
- * From that single collision: assignRefs is first-wins (`if (map.byRaw[id]) continue`)
- * and the folded original already owns `byRaw[h_…]`, so the fresh instance gets NO
- * ref; and prune drops any covered id that isn't the pinned first user message, so
- * the fresh user turn silently vanishes upstream.
+ * Two byte-identical shapes carry an exact-covered id and must be told apart:
  *
- * Why "covered base" is the discriminator: a base is covered iff an active block
- * lists it in effectiveMessageIds, i.e. its original is off the wire (replaced by a
- * summary). So any LIVE message carrying a covered id is a new instance, not the
- * original — and must get a distinct instance id. A NON-covered base keeps the
- * converter's numbering untouched: that is the shape where the old copy is still on
- * the wire and un-folded, where the in-pass occurrence count already keeps the pair
- * distinct, and touching the ids would only churn the prefix cache. Do not broaden
- * this to all bases.
+ * - the folded original's ECHO: stateless hosts resend the full raw history
+ *   every turn, so the original re-derives exactly the covered bare id. It was
+ *   present in the previous pass's inbound (`state.lastPassIds`) and must KEEP
+ *   its id — prune then drops it (it is already summarized) and the first-user
+ *   pin keeps a stable ref. Renumbering it (#459) minted a fresh ref and, worse,
+ *   made it escape prune's covered check (baseIdOf strips only "#tail", not
+ *   "_n"), so folded content rejoined the wire beside its summary every turn.
+ * - a genuinely NEW identical instance: absent from the previous pass, present
+ *   now. Renumber it to the first "_k" no folded copy claims so assign-refs
+ *   mints a distinct ref and prune keeps it (#1476's starvation fix).
  *
- * For each conflicting root, live instances are renumbered in arrival order to
- * root_1, root_2, … skipping any number a folded copy already claims. Deterministic
- * for a fixed (state, body): a live message whose root stays covered keeps the same
- * _k every turn (prefix-cache stable) and shifts only when a newer identical
- * instance joins the pass.
+ * Ids that are not exactly covered (converter-numbered "_1" second-occurrence
+ * forms of a covered root, non-h_ ids, roots without a covered copy) keep the
+ * converter's numbering untouched — renumbering those would only churn the
+ * prefix cache.
  */
 export function remintCoveredLiveIds(
   messages: CoreMessage[],
   state: CompressionState,
 ): CoreMessage[] {
-  const covered = new Set<string>();
-  for (const id of coveredMessageIds(state)) covered.add(baseIdOf(id));
-  if (covered.size === 0) return messages;
+  const coveredBases = new Set<string>();
+  for (const id of coveredMessageIds(state)) coveredBases.add(baseIdOf(id));
+  if (coveredBases.size === 0) return messages;
+  // Pre-feature persisted state has no prior-pass snapshot: fall back to
+  // renumber-nothing (0.0.95 semantics) for this one pass. The snapshot is
+  // written below in processTurn, so the next pass discriminates correctly.
+  if (!state.lastPassIds) return messages;
+  const prior = new Set(state.lastPassIds);
 
   const groups = new Map<string, number[]>();
   for (let i = 0; i < messages.length; i++) {
@@ -62,15 +64,35 @@ export function remintCoveredLiveIds(
   for (const [root, idxs] of groups) {
     // Only renumber when some live instance claims an id a folded copy owns;
     // otherwise the converter's numbering is already collision-free here.
-    const conflict = idxs.some((i) => covered.has(baseIdOf(messages[i]!.id)));
+    const conflict = idxs.some((i) =>
+      coveredBases.has(baseIdOf(messages[i]!.id)),
+    );
     if (!conflict) continue;
+    // Renumbered ids must dodge both folded-claimed numbers and ids other
+    // live instances of this root already hold (untouched ones keep theirs).
+    const liveIds = new Set(idxs.map((i) => baseIdOf(messages[i]!.id)));
     let k = 1;
     for (const i of idxs) {
-      while (covered.has(`${root}_${k}`)) k++;
       const id = messages[i]!.id;
+      const exactCovered = coveredBases.has(baseIdOf(id));
+      // Only a genuinely new instance is renumbered: its exact id is claimed
+      // by a folded copy AND it was absent from the previous pass. Everything
+      // else — the folded original's own resend (prior.has), converter-numbered
+      // "_n" forms that no folded copy claims, the live un-folded bare — keeps
+      // the converter's numbering; renumbering those would only churn the
+      // prefix cache and let summarized content escape prune (#462).
+      if (!exactCovered || prior.has(id)) continue;
+      while (
+        coveredBases.has(`${root}_${k}`) ||
+        liveIds.has(`${root}_${k}`) ||
+        prior.has(`${root}_${k}`)
+      )
+        k++;
       const hash = id.indexOf("#");
       const tail = hash > 0 ? id.slice(hash) : "";
-      next[i] = { ...messages[i]!, id: `${root}_${k}${tail}` };
+      const minted = `${root}_${k}${tail}`;
+      liveIds.add(baseIdOf(minted));
+      next[i] = { ...messages[i]!, id: minted };
       k++;
       changed = true;
     }
