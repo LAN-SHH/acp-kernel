@@ -78,6 +78,16 @@ test("skips instance numbers already claimed by folded copies", () => {
   assert.equal(out[0].id, `${HASH}_2`);
 });
 
+test("renumber skips numbers claimed by the previous pass inbound (#462)", () => {
+  const state = createInitialState();
+  state.blocks.push(folded([HASH]));
+  // HASH_1 was live in the previous pass (ref'd there) but is no longer in the
+  // resend set; re-minting it would alias its stale ref onto the new instance.
+  state.lastPassIds = [`${HASH}_1`];
+  const out = remintCoveredLiveIds([msg(HASH, "a")], state);
+  assert.equal(out[0].id, `${HASH}_2`);
+});
+
 test("preserves the sub-id projection tail", () => {
   const state = createInitialState();
   state.blocks.push(folded([HASH]));
@@ -217,6 +227,17 @@ test("first-user pinned echo keeps its id and ref across post-fold passes (#462 
     "m00001",
     "pinned first user message keeps its ref (no per-turn churn)",
   );
+});
+
+test("processTurn writes this pass's inbound ids into state.lastPassIds (#462)", () => {
+  const core = createCore();
+  const out = core.processTurn({
+    messages: [msg(EARLY, "帮我看看这段代码"), msg(HASH, "都按推荐来")],
+    state: createInitialState(),
+    config: defaultConfig(100000),
+    tokenCount: 300,
+  });
+  assert.deepEqual(out.state.lastPassIds, [EARLY, HASH]);
 });
 
 test("missing lastPassIds falls back to renumber-nothing for one pass (#462)", () => {
