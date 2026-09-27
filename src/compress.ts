@@ -1,4 +1,5 @@
 import { assignRefs, highestUsedIndex, indexToRef } from "./refs.js";
+import { remintCoveredLiveIds } from "./instance-reid.js";
 import { prune, isSummaryMessageId } from "./prune.js";
 import { syncBlocks } from "./sync.js";
 import { advanceSurvival, activeBlocks, blockById } from "./state.js";
@@ -784,6 +785,7 @@ export function createCore(ports: Ports = {}): CompressionCore {
    *  node bound to that strategy. */
   function buildNodes(strategy: RenderStrategy): PipelineNode[] {
     const base: PipelineNode[] = [
+      reconcileLiveIdsNode,
       assignRefsNode,
       syncBlocksNode,
       pruneNode,
@@ -817,6 +819,13 @@ export function createCore(ports: Ports = {}): CompressionCore {
 // tags are DERIVED at the end (renderRefsNode) — no dual source of truth, so
 // the old stripHallucinations band-aid is gone. Truncation is the LAST
 // token-reducing safety valve; render-refs is the final annotation pass.
+
+const reconcileLiveIdsNode: PipelineNode = {
+  name: "reconcile-live-ids",
+  run(io) {
+    return { ...io, messages: remintCoveredLiveIds(io.messages, io.state) };
+  },
+};
 
 const assignRefsNode: PipelineNode = {
   name: "assign-refs",
