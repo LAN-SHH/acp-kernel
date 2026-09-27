@@ -123,7 +123,10 @@ test("fresh later user turn survives prune with a distinct id + ref (#1476 e2e)"
   // Pass A: history WITHOUT any HASH instance — establishes the prior-pass
   // snapshot the next pass discriminates against.
   const passA = core.processTurn({
-    messages: [msg(EARLY, "帮我看看这段代码"), msg("acp_summary_b1", "[Compressed conversation section] …", "system")],
+    messages: [
+      msg(EARLY, "帮我看看这段代码"),
+      msg("acp_summary_b1", "[Compressed conversation section] …", "system"),
+    ],
     state,
     config: defaultConfig(100000),
     tokenCount: 300,
@@ -219,6 +222,10 @@ test("first-user pinned echo keeps its id and ref across post-fold passes (#462 
 test("missing lastPassIds falls back to renumber-nothing for one pass (#462)", () => {
   const state = seededFoldState();
   const out = remintCoveredLiveIds([msg(HASH, "都按推荐来")], state);
-  assert.equal(out[0].id, HASH, "0.0.95 semantics: untouched without a snapshot");
+  assert.equal(
+    out[0].id,
+    HASH,
+    "0.0.95 semantics: untouched without a snapshot",
+  );
   assert.equal(out.length, 1);
 });

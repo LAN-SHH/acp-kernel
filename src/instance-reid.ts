@@ -64,7 +64,9 @@ export function remintCoveredLiveIds(
   for (const [root, idxs] of groups) {
     // Only renumber when some live instance claims an id a folded copy owns;
     // otherwise the converter's numbering is already collision-free here.
-    const conflict = idxs.some((i) => coveredBases.has(baseIdOf(messages[i]!.id)));
+    const conflict = idxs.some((i) =>
+      coveredBases.has(baseIdOf(messages[i]!.id)),
+    );
     if (!conflict) continue;
     // Renumbered ids must dodge both folded-claimed numbers and ids other
     // live instances of this root already hold (untouched ones keep theirs).
