@@ -45,8 +45,9 @@ export function resolveCcrConfig(config: Config): CcrConfig {
   return { ...DEFAULT_CCR_CONFIG, ...config.ccr };
 }
 
-/** Marker embedded in every placeholder. Idempotency check for the pipeline
- *  node AND the exclusion signal for absorb (ID-reference wins over distill). */
+/** Marker embedded in every placeholder. Exclusion signal for absorb
+ *  (ID-reference wins over distill); recognition is via the STRICT parser
+ *  below, never a substring scan (billion-context#1456). */
 export const STORED_PLACEHOLDER_MARKER = "[acp-stored";
 
 /** Reserved id prefix for ephemeral retrieval injections (mirrors
@@ -154,10 +155,86 @@ export function stripLeadingTag(text: string): string {
   return text.replace(LEADING_TAG_RE, "");
 }
 
-/** Marker check over the untagged body: hosts round-trip rendered output, so
- *  placeholders arrive prefixed with their own history tag. */
+/** Parsed canonical CCR placeholder (whole-body shape of
+ *  buildStoredPlaceholder output). */
+export interface ParsedStoredPlaceholder {
+  ref: string;
+  kind: string;
+  tokens: number;
+  retrieveToolName: string;
+  /** Backtick title from line 1 (command/head preview), when present. */
+  title?: string;
+}
+
+// Strict whole-body grammar of buildStoredPlaceholder output. Refs are always
+// 5-digit zero-padded (refs.ts REF_WIDTH); tokens use groupThousands grouping
+// (no leading zeros, comma groups); both lines cite the same ref. A bare
+// substring mention of "[acp-stored" anywhere in larger text matches NOTHING
+// here (billion-context#1456).
+const PLACEHOLDER_LINE1_RE = new RegExp(
+  "^📦 \\[acp-stored #(m\\d{5}) · (.+?) · (0|[1-9]\\d{0,2}(?:,\\d{3})*) tok\\](?: `(.+)`)?$",
+);
+const PLACEHOLDER_LINE2_RE = /^   → (.+?)\("(m\d{5})"\) returns the full text$/;
+
+/** Parse a WHOLE-BODY canonical CCR placeholder; null otherwise.
+ *
+ *  Accepts exactly the two-line structure emitted by buildStoredPlaceholder,
+ *  modulo one trusted leading render tag (hosts round-trip rendered output)
+ *  and one optional trailing newline. Ordinary source, docs or logs that
+ *  merely MENTION the marker — including embedded full placeholder examples
+ *  with surrounding text — parse to null. The residual ambiguity is only user
+ *  content byte-equal to a canonical placeholder, which no pure-text protocol
+ *  can disambiguate (structured provenance is the long-term fix; deliberately
+ *  out of scope here). Callers that know the message's own ref MUST compare
+ *  `parsed.ref === ownRef` before trusting the result as an internal
+ *  placeholder. */
+export function parseStoredPlaceholder(
+  text: string,
+): ParsedStoredPlaceholder | null {
+  const body = stripLeadingTag(text);
+  const trimmed = body.endsWith("\n") ? body.slice(0, -1) : body;
+  const nl = trimmed.indexOf("\n");
+  if (nl <= 0) return null;
+  const line1 = trimmed.slice(0, nl);
+  const line2 = trimmed.slice(nl + 1);
+  if (line2.includes("\n")) return null;
+  const head = PLACEHOLDER_LINE1_RE.exec(line1);
+  if (!head) return null;
+  const hint = PLACEHOLDER_LINE2_RE.exec(line2);
+  if (!hint) return null;
+  const ref = head[1];
+  const kind = head[2];
+  const tokenGroup = head[3];
+  const toolName = hint[1];
+  const hintRef = hint[2];
+  if (
+    !ref ||
+    !hintRef ||
+    ref !== hintRef ||
+    !kind ||
+    !tokenGroup ||
+    !toolName
+  ) {
+    return null;
+  }
+  const parsed: ParsedStoredPlaceholder = {
+    ref,
+    kind,
+    tokens: Number(tokenGroup.replace(/,/g, "")),
+    retrieveToolName: toolName,
+  };
+  const title = head[4];
+  if (title !== undefined) parsed.title = title;
+  return parsed;
+}
+
+/** True iff the WHOLE body is a canonical CCR placeholder — i.e. the kernel
+ *  already replaced this tool result and it must not be stored, re-compressed
+ *  or absorbed again. Replaces the former `includes("[acp-stored")` substring
+ *  check that misclassified ordinary text merely mentioning the marker
+ *  (billion-context#1456). */
 export function isStoredPlaceholderText(text: string): boolean {
-  return stripLeadingTag(text).includes(STORED_PLACEHOLDER_MARKER);
+  return parseStoredPlaceholder(text) !== null;
 }
 
 export function retrievedMessageId(ref: string): string {
@@ -275,7 +352,13 @@ export function storeLargeResults(
     if (message.contentType !== "tool-result") return message;
     const text = message.text ?? "";
     if (text.length === 0) return message;
-    if (isStoredPlaceholderText(text)) return message;
+    const ref = refForRaw(input.state.messageRefs, message.id);
+    // (#1456) strict gate: only a WHOLE-BODY canonical placeholder carrying
+    // this message's own ref skips storage. Ordinary content that merely
+    // mentions the marker (source defining it, docs quoting an example) falls
+    // through to normal storage below.
+    const placeholder = parseStoredPlaceholder(text);
+    if (placeholder && (!ref || placeholder.ref === ref)) return message;
     if (!message.toolCallId) return message;
     const toolName = message.toolName;
     if (
@@ -293,7 +376,6 @@ export function storeLargeResults(
     if (isMessageProtected(message, input.config)) return message;
     const tokens = input.countTokens(text);
     if (tokens < cfg.minToolTokens) return message;
-    const ref = refForRaw(input.state.messageRefs, message.id);
     if (!ref || ref === BLOCKED_REF) return message;
     if (hasStoredRef(current, ref)) return message;
     const kind = classifyKind(toolName);
@@ -400,7 +482,11 @@ export function storeCoveredOriginals(
     // without the store). Storing the placeholder bytes would turn every
     // later retrieve-by-ref into a fake hit echoing the placeholder itself —
     // the symmetric skip mirrors the arrival-time path in storeLargeResults.
-    if (isStoredPlaceholderText(text)) continue;
+    // (#1456) strict gate: only a WHOLE-BODY canonical placeholder carrying
+    // THIS message's own ref skips; ordinary content embedding a marker
+    // example, or placeholder-shaped text citing a foreign ref, stores as a
+    // genuine original.
+    if (parseStoredPlaceholder(text)?.ref === ref) continue;
     current = storeOriginal(current, {
       ref,
       rawId: message.id,

@@ -189,6 +189,7 @@ export {
   normalizeHead,
   extractCommand,
   buildStoredPlaceholder,
+  parseStoredPlaceholder,
   isStoredPlaceholderText,
   retrievedMessageId,
   isRetrievedMessage,
@@ -201,6 +202,7 @@ export {
 } from "./ccr.js";
 export type {
   StoredPlaceholderInput,
+  ParsedStoredPlaceholder,
   RetrievalInjection,
   ApplyRetrieveInput,
   ApplyRetrieveResult,
