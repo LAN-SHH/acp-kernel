@@ -298,6 +298,12 @@ to decide between message-level and wire-level surgery.
 
 > **Protected tool messages:** protected tool calls (per `config.protectedTools`) and their paired tool-results are hard-excluded from compression — they are dropped from the compressible set and from the new block's `effectiveMessageIds`, so they stay fully visible and are never folded into a summary. This matches opencode-acp's Bug 39 fix. The soft-protected recent zone (`preserveRecentMessages` / last user message) is handled separately: messages there are excluded from the range but do not fail it (an entirely-protected range fails with a clear error).
 
+## Attribution requirement (one term on top of MIT)
+
+`acp-kernel` is MIT-licensed **plus one additional term**: any product or service (commercial or open source) whose users can see or interact with it and which uses this kernel must attribute it — stating that it uses acp-kernel with a link back to this repository — on its home page, documentation, or About/Credits page. Pure server-side/embedded use satisfies this via shipped documentation. See the **Additional Term** at the end of [LICENSE](LICENSE).
+
+If you build on this kernel, we'd love to hear about it: open an issue (no obligation) so we can track where it's used.
+
 ## License
 
 MIT © ranxianglei
