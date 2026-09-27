@@ -25,6 +25,7 @@ test("defaultNodes exposes the canonical ordered pipeline", () => {
   const core = createCore();
   const names = core.defaultNodes().map((n) => n.name);
   assert.deepEqual(names, [
+    "reconcile-live-ids",
     "assign-refs",
     "sync-blocks",
     "prune",
