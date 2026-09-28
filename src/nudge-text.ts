@@ -302,7 +302,7 @@ export function renderNudgeText(
       rangesStr,
       ...(blockMapStr ? ["", blockMapStr] : []),
       "",
-      `💡 If you compress, fold the ranges you keep in ONE call (pass multiple content entries: \`content: [{...}, {...}]\`). Ranges the task still needs can wait — they reappear in later nudges.`,
+      `💡 If you compress, fold the ranges you keep in ONE call — pass multiple content entries (\`content: [{...}, {...}]\`) or ONE plain string holding every range, each block starting with its 'mNNNNN–mNNNNN topic' header line (most robust through lossy gateways). Ranges the task still needs can wait — they reappear in later nudges.`,
     ]).join("\n"),
   };
 }

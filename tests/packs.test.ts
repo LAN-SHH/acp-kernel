@@ -83,7 +83,7 @@ test("lean pack keeps rules default, one-line tool descriptions, adapters namesp
   assert.deepEqual(leanPack.surface.prompts ?? {}, {});
   assert.equal(
     leanPack.surface.toolPrompts?.compress?.description,
-    "Replace consumed conversation ranges with self-contained summaries using mNNNNN or bN refs.",
+    "Replace consumed conversation ranges with self-contained summaries using mNNNNN or bN refs; batch multiple ranges into ONE call (a single string may hold every range).",
   );
   assert.ok(
     leanPack.surface.adapters && typeof leanPack.surface.adapters === "object",

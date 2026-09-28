@@ -1168,3 +1168,37 @@ test("rebuildCompressionState rebuilds from a single-object content tool-call (#
     result.state.blocks.find((b) => b.summary.includes("single object")),
   );
 });
+
+test("one bare string may carry a whole batch: every tool surface recommends it (#472)", () => {
+  // The default/lean packs + the nudge hint now teach this form as the
+  // gateway-robust way to batch — pin the parse so it cannot regress.
+  const { ranges, diagnostics } = parseCompressArgs({
+    content:
+      "m00001–m00005 topic one\nsummary one line.\nm00006–m00008\ntopic-less summary.",
+  });
+  assert.equal(diagnostics.kind, "ok");
+  assert.equal(diagnostics.invalidItems, 0);
+  assert.equal(ranges.length, 2);
+  assert.deepEqual(
+    {
+      start: ranges[0]?.startRef,
+      end: ranges[0]?.endRef,
+      topic: ranges[0]?.topic,
+      summary: ranges[0]?.summary,
+    },
+    {
+      start: "m00001",
+      end: "m00005",
+      topic: "topic one",
+      summary: "summary one line.",
+    },
+  );
+  assert.deepEqual(
+    {
+      start: ranges[1]?.startRef,
+      end: ranges[1]?.endRef,
+      summary: ranges[1]?.summary,
+    },
+    { start: "m00006", end: "m00008", summary: "topic-less summary." },
+  );
+});
