@@ -997,3 +997,174 @@ test("parseCompressArgs resets the adoption pairing at an object entry (#1001)",
   assert.equal(ranges[0]?.summary, "good");
   assert.equal(diagnostics.invalidItems, 1);
 });
+
+// ---------------------------------------------------------------------------
+// #470: content given as a single entry OBJECT instead of a one-element array
+// (retry drift observed via billion-context #1494/#1495). The top level already
+// recovers a bare entry object without content; the SAME shape inside content
+// used to hard-fail with content-not-array. Both lanes (proxy normalizer
+// billion-context#1497 and plugin-mode bundled kernel) must agree here.
+// ---------------------------------------------------------------------------
+
+test("parseCompressArgs wraps a single entry object in the content slot (#470)", () => {
+  const { ranges, diagnostics } = parseCompressArgs({
+    content: {
+      startId: "m04083",
+      endId: "m04092",
+      summary: "lost range retry",
+    },
+  });
+  assert.equal(diagnostics.kind, "ok");
+  assert.equal(diagnostics.ok, true);
+  assert.equal(diagnostics.contentSalvage, true);
+  assert.equal(diagnostics.invalidItems, 0);
+  assert.equal(ranges.length, 1);
+  assert.equal(ranges[0]?.startRef, "m04083");
+  assert.equal(ranges[0]?.endRef, "m04092");
+  assert.equal(ranges[0]?.summary, "lost range retry");
+});
+
+test("parseCompressArgs keeps per-entry topic/summaryMaxChars on a wrapped entry (#470)", () => {
+  const { ranges, diagnostics } = parseCompressArgs({
+    content: {
+      startRef: "m00001",
+      endRef: "m00002",
+      summary: "s",
+      topic: "Own",
+      summaryMaxChars: 1234,
+    },
+  });
+  assert.equal(diagnostics.kind, "ok");
+  assert.equal(ranges.length, 1);
+  assert.equal(ranges[0]?.topic, "Own");
+  assert.equal(ranges[0]?.summaryMaxChars, 1234);
+});
+
+test("parseCompressArgs applies a top-level topic to a wrapped single entry (#470)", () => {
+  const { ranges } = parseCompressArgs({
+    topic: "Top",
+    content: { startRef: "m00001", endRef: "m00002", summary: "s" },
+  });
+  assert.equal(ranges.length, 1);
+  assert.equal(ranges[0]?.topic, "Top");
+});
+
+test("parseCompressArgs stamps compressCallId through the wrap (#470)", () => {
+  const { ranges } = parseCompressArgs(
+    { content: { startRef: "m00001", endRef: "m00002", summary: "s" } },
+    { callId: "call-470" },
+  );
+  assert.equal(ranges[0]?.compressCallId, "call-470");
+});
+
+test("parseCompressArgs recovers string-encoded single-object content (#470)", () => {
+  const input = JSON.stringify({
+    content: { startId: "m04083", endId: "m04092", summary: "str" },
+  });
+  const { ranges, diagnostics } = parseCompressArgs(input);
+  assert.equal(diagnostics.kind, "ok");
+  assert.equal(diagnostics.contentSalvage, true);
+  assert.equal(ranges.length, 1);
+  assert.equal(ranges[0]?.startRef, "m04083");
+  assert.equal(ranges[0]?.summary, "str");
+});
+
+test("parseCompressArgs recovers fenced double-stringified single-object content (#470)", () => {
+  const inner = JSON.stringify(
+    JSON.stringify({
+      content: { startId: "m00001", endId: "m00002", summary: "solo" },
+    }),
+  );
+  const { ranges, diagnostics } = parseCompressArgs(
+    "```json\n" + inner + "\n```",
+  );
+  assert.equal(diagnostics.kind, "ok");
+  assert.equal(diagnostics.contentSalvage, true);
+  assert.equal(ranges.length, 1);
+  assert.equal(ranges[0]?.summary, "solo");
+});
+
+test("parseCompressArgs unwraps a nested ranges array in the content slot (#470)", () => {
+  const { ranges, diagnostics } = parseCompressArgs({
+    content: {
+      ranges: [
+        { startRef: "m00001", endRef: "m00002", summary: "a" },
+        { startRef: "m00003", endRef: "m00004", summary: "b" },
+      ],
+    },
+  });
+  assert.equal(diagnostics.kind, "ok");
+  assert.equal(diagnostics.contentSalvage, true);
+  assert.equal(ranges.length, 2);
+  assert.equal(ranges[0]?.summary, "a");
+  assert.equal(ranges[1]?.summary, "b");
+});
+
+test("parseCompressArgs degrades a wrapped garbage object to per-entry reasons, not opaque content-not-array (#470)", () => {
+  const { ranges, diagnostics } = parseCompressArgs({ content: { foo: 1 } });
+  assert.equal(ranges.length, 0);
+  assert.equal(diagnostics.ok, false);
+  assert.equal(diagnostics.kind, "no-valid-ranges");
+  assert.equal(diagnostics.contentSalvage, true);
+  assert.equal(diagnostics.invalidItems, 1);
+  assert.ok(
+    diagnostics.invalidReasons?.[0]?.includes("missing range bounds"),
+    JSON.stringify(diagnostics),
+  );
+});
+
+test("parseCompressArgs reports missing fields on an incomplete wrapped entry (#470)", () => {
+  const { ranges, diagnostics } = parseCompressArgs({
+    content: { startId: "m00001", endId: "m00002" },
+  });
+  assert.equal(ranges.length, 0);
+  assert.equal(diagnostics.kind, "no-valid-ranges");
+  assert.equal(diagnostics.invalidItems, 1);
+  assert.ok(
+    diagnostics.invalidReasons?.[0]?.includes("missing summary"),
+    JSON.stringify(diagnostics),
+  );
+});
+
+test("parseCompressArgs drops a truncated single-object content entry without guessing (#470)", () => {
+  const { ranges, diagnostics } = parseCompressArgs(
+    '{"content": {"startId": "m00001", "endId": "m0',
+  );
+  assert.equal(ranges.length, 0);
+  assert.equal(diagnostics.ok, false);
+  assert.equal(diagnostics.kind, "truncated");
+});
+
+test("parseCompressArgs keeps content-not-array for non-object content values (#470)", () => {
+  for (const input of [{ content: 42 }, { content: null }, { content: true }]) {
+    const { ranges, diagnostics } = parseCompressArgs(input);
+    assert.equal(diagnostics.kind, "content-not-array", JSON.stringify(input));
+    assert.equal(diagnostics.ok, false);
+    assert.equal(diagnostics.contentSalvage, undefined, JSON.stringify(input));
+    assert.equal(ranges.length, 0);
+  }
+});
+
+test("parseCompressArgs leaves canonical array inputs unmarked by contentSalvage (#470)", () => {
+  const { ranges, diagnostics } = parseCompressArgs({
+    content: [{ startRef: "m00001", endRef: "m00002", summary: "clean" }],
+  });
+  assert.equal(diagnostics.kind, "ok");
+  assert.equal(diagnostics.contentSalvage, undefined);
+  assert.equal(ranges.length, 1);
+});
+
+test("rebuildCompressionState rebuilds from a single-object content tool-call (#470)", () => {
+  const args = JSON.stringify({
+    content: { startId: "m00001", endId: "m00002", summary: "single object" },
+  });
+  const result = rebuildCompressionState(
+    createInitialState(),
+    rebuildMessages(args, "call1"),
+    rebuildConfig(),
+  );
+  assert.equal(result.blocksRebuilt, 1);
+  assert.ok(
+    result.state.blocks.find((b) => b.summary.includes("single object")),
+  );
+});

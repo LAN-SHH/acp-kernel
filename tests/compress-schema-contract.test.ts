@@ -161,15 +161,26 @@ test("empty-ish calls are the parser's job, not the schema's (bili #1299)", () =
   }
 });
 
-test("an object under content stays rejected (parser yields zero ranges for it)", () => {
+test("an object under content: schema stays strict, the parser salvages (#470)", () => {
   // The trap shape: {content: {startId,endId,summary}} looks like a natural
-  // single-range call, but parseCompressArgs treats a non-array/non-string
-  // content as "content-not-array" and recovers nothing — so the schema must
-  // not widen to accept it either (that would trade a loud rejection for a
-  // silent no-op).
-  rejectedByBoth({
+  // single-range call. The schema cannot widen to accept it (top-level
+  // alternations are off-limits — see the empty-ish-calls test above), so
+  // structural rejection at the schema layer stands. #470 removed the old
+  // hard content-not-array wall in the parser: the object is wrapped into a
+  // one-element array and validated like any other entry, so a well-formed
+  // one now recovers instead of dying.
+  const trap = {
     content: { startId: "m00150", endId: "m00220", summary: "S" },
-  });
+  };
+  assert.equal(
+    validate(COMPRESS_PARAMETERS as Record<string, unknown>, trap),
+    false,
+    "schema must stay strict: object under content",
+  );
+  const { ranges, diagnostics } = parseCompressArgs(trap);
+  assert.equal(ranges.length, 1);
+  assert.ok(diagnostics.ok);
+  assert.equal(diagnostics.contentSalvage, true);
 });
 
 test("empty content array passes the schema; the parser degrades gracefully", () => {

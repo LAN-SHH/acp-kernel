@@ -10,6 +10,8 @@
 //     billion-context#176)
 //   - single-quoted JSON: {'content': [...]} (weak local models,
 //     billion-context#603 / omp#121)
+//   - a single entry OBJECT where the content array belongs (retry drift,
+//     billion-context#1494 / acp-kernel#470)
 //   - the stream cut off mid-arguments, leaving a truncated JSON prefix
 //
 // Hosts parse this on their own today: rebuild.ts (strict, silent skip),
@@ -42,6 +44,9 @@ export interface CompressParseDiagnostics {
   kind: CompressParseKind;
   /** True when the winning parse came from single→double quote repair. */
   quoteSalvage?: boolean;
+  /** True when a non-array `content` value (single entry object or nested
+   *  `ranges` array) was recovered into the canonical array form (#470). */
+  contentSalvage?: boolean;
   /** First 800 chars of the raw string input (string inputs only). */
   rawPrefix?: string;
   /** Raw string input length (string inputs only). */
@@ -212,6 +217,17 @@ function parseObjectValue(
     entries = parsed.entries;
     salvaged = parsed.salvaged;
     if (parsed.quoteRepaired) diag.quoteSalvage = true;
+  } else if (content !== null && typeof content === "object") {
+    // #470: a single entry OBJECT in the content slot instead of a
+    // one-element array — the SAME drift the top level already recovers
+    // (bare entry without content, above). Wrap it so the shared
+    // validation applies unchanged; a nested `ranges` array is unwrapped
+    // instead. Mirrors the proxy-lane normalization (billion-context#1497)
+    // so both lanes converge on this ladder.
+    const obj = content as Record<string, unknown>;
+    const nested = obj["ranges"];
+    entries = Array.isArray(nested) ? nested : [obj];
+    diag.contentSalvage = true;
   } else {
     diag.kind = "content-not-array";
     return finish([], diag);
