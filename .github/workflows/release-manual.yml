@@ -30,11 +30,15 @@ jobs:
 
       - name: Resolve version
         id: version
+        env:
+          # Security: never expand the dispatch input into the script text.
+          # Whole-string match (no line-based grep) so later steps can trust
+          # steps.version.outputs.version to hold semver characters only.
+          REQ: ${{ inputs.version }}
         run: |
-          REQ="${{ inputs.version }}"
           if [ -n "$REQ" ]; then
-            if ! echo "$REQ" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-              echo "::error::version '$REQ' does not look like semver (x.y.z or x.y.z-prerelease)"
+            if [[ ! "$REQ" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::version input does not look like semver (x.y.z or x.y.z-prerelease)"
               exit 1
             fi
             echo "version=$REQ" >> "$GITHUB_OUTPUT"
