@@ -1202,3 +1202,37 @@ test("one bare string may carry a whole batch: every tool surface recommends it 
     { start: "m00006", end: "m00008", summary: "topic-less summary." },
   );
 });
+
+// ---------------------------------------------------------------------------
+// Line-form fallback: linear-time split (ReDoS regression)
+// ---------------------------------------------------------------------------
+
+test("line-form split stays linear on a long whitespace run", () => {
+  for (const content of [
+    "x" + "\n".repeat(50_000) + "x",
+    'x\n",' + " ".repeat(50_000) + "x",
+    "x" + " ".repeat(50_000) + "y]",
+  ]) {
+    const started = performance.now();
+    const { diagnostics } = parseCompressArgs({ content });
+    const elapsed = performance.now() - started;
+    assert.equal(diagnostics.kind, "content-not-array");
+    assert.ok(elapsed < 2000, `line-form parse took ${elapsed.toFixed(0)}ms`);
+  }
+});
+
+test("line-form split still breaks on headers after blank lines and element residue", () => {
+  const { ranges, diagnostics } = parseCompressArgs({
+    content:
+      'm00001-m00005 first\nsummary one.\n\n  "m00006-m00008 second\nsummary two."\n\t\n"m00009-m00010\nsummary three.',
+  });
+  assert.equal(diagnostics.kind, "ok");
+  assert.deepEqual(
+    ranges.map((r) => [r.startRef, r.endRef, r.summary]),
+    [
+      ["m00001", "m00005", "summary one."],
+      ["m00006", "m00008", "summary two."],
+      ["m00009", "m00010", "summary three."],
+    ],
+  );
+});

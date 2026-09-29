@@ -438,18 +438,64 @@ export function deriveTopicFromSummary(summary: string): string | undefined {
   return text.length > 60 ? clampPrefix(text, 60).trimEnd() : text;
 }
 
+const LINE_ENTRY_REFS_RE =
+  /[mb]\d{1,7}\s*(?:[-\u2013\u2014\u2026~]|\.\.\.|to)\s*[mb]\d{1,7}\b/iy;
+const WHITESPACE_RE = /\s/;
+
+function skipWhitespace(s: string, i: number): number {
+  while (i < s.length && WHITESPACE_RE.test(s[i]!)) i++;
+  return i;
+}
+
+function isQuote(ch: string | undefined): boolean {
+  return ch === '"' || ch === "'";
+}
+
+function refsHeaderAt(s: string, i: number): boolean {
+  LINE_ENTRY_REFS_RE.lastIndex = i;
+  return LINE_ENTRY_REFS_RE.test(s);
+}
+
+// Deterministic form of `\s*(?:["']\s*,\s*)?["']?\s*<refs>` at `i`, which
+// sits just past the leading whitespace run.
+function startsLineEntry(s: string, i: number): boolean {
+  if (!isQuote(s[i])) return refsHeaderAt(s, i);
+  const afterQuote = skipWhitespace(s, i + 1);
+  if (s[afterQuote] !== ",") return refsHeaderAt(s, afterQuote);
+  const afterComma = skipWhitespace(s, afterQuote + 1);
+  if (!isQuote(s[afterComma])) return refsHeaderAt(s, afterComma);
+  return refsHeaderAt(s, skipWhitespace(s, afterComma + 1));
+}
+
 /** Split a bare string content (not a JSON array) into line-form entries: a
- *  line that starts a ref pair begins a new entry. The split lookahead
- *  tolerates stringified-element residue (the previous element's closing
- *  quote, the separating comma, the next element's opening quote) before the
- *  next refs header — batch payloads that lost their JSON escaping still split
- *  on their headers. Fallback path only — arrays of strings are the primary
- *  line-form transport. */
+ *  line that starts a ref pair begins a new entry. The split tolerates
+ *  stringified-element residue (the previous element's closing quote, the
+ *  separating comma, the next element's opening quote) before the next refs
+ *  header — batch payloads that lost their JSON escaping still split on their
+ *  headers. Fallback path only — arrays of strings are the primary line-form
+ *  transport.
+ *
+ *  Security: the content is model-written. A regex lookahead with adjacent
+ *  `\s*` runs backtracks cubically over a long whitespace run, so the header
+ *  test is a linear scan. Every newline in one whitespace run reaches the same
+ *  next non-space character, so the test runs once per run. */
 function splitLineEntries(content: string): unknown[] {
-  const parts = content
-    .split(
-      /\n(?=\s*(?:["']\s*,\s*)?["']?\s*[mb]\d{1,7}\s*(?:[-\u2013\u2014\u2026~]|\.\.\.|to)\s*[mb]\d{1,7}\b)/i,
-    )
+  const chunks: string[] = [];
+  let chunkStart = 0;
+  let nl = content.indexOf("\n");
+  while (nl !== -1) {
+    const runEnd = skipWhitespace(content, nl + 1);
+    if (startsLineEntry(content, runEnd)) {
+      for (let p = nl; p < runEnd; p++) {
+        if (content[p] !== "\n") continue;
+        chunks.push(content.slice(chunkStart, p));
+        chunkStart = p + 1;
+      }
+    }
+    nl = content.indexOf("\n", runEnd);
+  }
+  chunks.push(content.slice(chunkStart));
+  const parts = chunks
     .map((p) =>
       p
         .trim()
@@ -468,7 +514,11 @@ function stripJsonWrapperResidue(s: string): string {
   let t = s.trim();
   if (t.startsWith("[")) t = t.replace(/^\[+\s*/, "");
   t = t.replace(/^"/, "");
-  if (t.endsWith("]")) t = t.replace(/\s*\]+$/, "");
+  if (t.endsWith("]")) {
+    let end = t.length;
+    while (end > 0 && t[end - 1] === "]") end--;
+    t = t.slice(0, end).trimEnd();
+  }
   t = t.replace(/"$/, "");
   return t.trim();
 }
