@@ -157,6 +157,11 @@ Contract guarantees:
   and excluded from block coverage — they consume no ref and enter no fold
   space. Hosts may strip them after the request (nudge channel); if they
   round-trip anyway, the kernel handles them safely.
+- **Untrusted, never privileged.** The injection is a `user`-role message that
+  labels the original as untrusted data and wraps it in
+  `<acp-retrieved ref="…">…</acp-retrieved>` (a closing tag inside the body is
+  neutralized). Stored originals are tool output an attacker may control, so
+  they never ride at system/developer authority on the wire.
 - **Coexists with absorb.** Placeholder-marked results are never absorb
   candidates (ID-reference wins); absorb keeps handling semantic distillation
   of everything else.
