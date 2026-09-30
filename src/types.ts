@@ -238,6 +238,11 @@ export interface CcrConfig {
   excludeTools: string[];
   /** Max characters for the placeholder's head/command preview. */
   maxHeadChars: number;
+  /** Retrieved originals below this many tokens are inlined into the
+   *  acp_retrieve tool result; at/above it they are exported to a file under
+   *  the host-provided export dir (pointer rides the tool result). Default
+   *  4000 (RETRIEVE_INLINE_TOKENS_DEFAULT). */
+  retrieveInlineTokens?: number;
 }
 
 export interface CompressionState {
