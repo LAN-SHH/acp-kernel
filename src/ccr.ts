@@ -327,7 +327,7 @@ export interface RetrievalExport {
   path: string;
   /** Exact bytes to write. */
   text: string;
-}/** Re-project the arrival-time placeholder for a stored ref whose original
+} /** Re-project the arrival-time placeholder for a stored ref whose original
  *  bytes arrived again raw (host retransmission). Frozen entry fields keep
  *  the wire byte-stable; entries persisted before `command` existed fall back
  *  to re-extracting from the paired call args, then to the head preview —
@@ -420,7 +420,8 @@ export function applyRetrieve(input: ApplyRetrieveInput): ApplyRetrieveResult {
     toolResultText: frameRetrievedOriginal(ref, found.entry, found.text),
     entry: found.entry,
   };
-}export interface StoreLargeResultsInput {
+}
+export interface StoreLargeResultsInput {
   messages: CoreMessage[];
   state: CompressionState;
   store: MessageContentStore;
