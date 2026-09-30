@@ -736,8 +736,9 @@ export function createCore(ports: Ports = {}): CompressionCore {
   function retrieve(
     store: MessageContentStore,
     ref: string,
+    opts?: { exportDir?: string; inlineTokenLimit?: number },
   ): ApplyRetrieveResult {
-    return applyRetrieve({ store, ref });
+    return applyRetrieve({ store, ref, ...opts });
   }
 
   function decompress(blockId: string, state: CompressionState) {

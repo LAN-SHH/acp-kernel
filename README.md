@@ -104,9 +104,13 @@ a tool result at or above `ccr.minToolTokens` is stored **once, at arrival** in
 the per-session content store, and its visible copy is replaced with a
 deterministic placeholder carrying enough signal (kind, size, command/head
 preview, ref) to judge relevance without retrieving. The model pulls the
-original back via the `acp_retrieve` tool; the retrieved text rides back as an
-ephemeral trailing message that never consumes a ref and never enters the fold
-space. Disabled by default — no behavior change unless opted in.
+original back via the `acp_retrieve` tool; the original rides back IN THE
+TOOL RESULT ITSELF — plain tool output, the lowest trust tier, exactly where
+the content came from. No host-synthesized system/user message channel
+exists. Originals at or above `ccr.retrieveInlineTokens` (default 4000) are
+exported to a host-managed file (an effect the host writes; the kernel
+performs no I/O) and returned as a pointer the model pages through with its
+own file-read tool. Disabled by default — no behavior change unless opted in.
 
 ```ts
 const config = defaultConfig(200000, { ccr: { enabled: true } }); // opt-in
@@ -121,13 +125,18 @@ const { messages, state, contentStore } = core.processTurn({
 });
 
 // When the model calls acp_retrieve({ ref }):
-const hit = core.retrieve(contentStore, "m00042");
+const hit = core.retrieve(contentStore, "m00042", {
+  exportDir: "/state/billion-context/retrieve", // host-managed, optional
+});
 if (hit.ok) {
-  // hit.text      — the original bytes
-  // hit.injection — trailing request-only message to append for this request
-  // hit.ackText   — short tool-result ack string
+  // hit.text           — the original bytes
+  // hit.toolResultText — the complete acp_retrieve tool result: the framed
+  //                      original (inline), or a pointer when hit.export is
+  //                      present (originals >= retrieveInlineTokens)
+  // hit.export         — host effect: write hit.export.text to hit.export.path
+  //                      before replying (the kernel performs no I/O)
 } else {
-  // hit.ackText — not-found notice (hallucinated ref costs one tool call)
+  // hit.toolResultText — not-found notice (hallucinated ref costs one tool call)
 }
 ```
 
@@ -153,10 +162,23 @@ Contract guarantees:
   and never reissues or recycles refs. Refs stay retrievable even if a host
   prunes its own `messageRefs` map after compaction (e.g. billion-context
   archive), because lookup happens against the store, not the ref map.
-- **Ephemeral retrieval.** `acp_retrieved_*` messages are skipped by assign-refs
-  and excluded from block coverage — they consume no ref and enter no fold
-  space. Hosts may strip them after the request (nudge channel); if they
-  round-trip anyway, the kernel handles them safely.
+- **Retrieval is a plain tool call.** The payload rides back in the
+  tool-result slot itself — the lowest trust tier, exactly where the content
+  came from — so no host-synthesized system/user message channel exists and
+  there is nothing to strip after the request. Legacy `acp_retrieved_*`
+  messages (persisted by older hosts) are still recognized and excluded from
+  refs and block coverage for round-trip safety.
+- **Bounded re-inflation.** Retrieving never re-inflates the conversation by
+  more than `ccr.retrieveInlineTokens` (default 4000): the inline branch
+  returns the framed original as the tool result, and anything larger is
+  exported to `<exportDir>/<ref>.txt` (deterministic per ref, idempotent
+  rewrites) with the tool result carrying a pointer the model pages through
+  with its own file-read tool (offset/limit).
+- **Untrusted, never privileged.** The tool result labels the payload as
+  untrusted data and wraps it in `<acp-retrieved ref="…">…</acp-retrieved>`
+  (a closing tag inside the body is neutralized); the export pointer carries
+  the same label. Stored originals are tool output an attacker may control,
+  so they never ride at system/developer authority on the wire.
 - **Coexists with absorb.** Placeholder-marked results are never absorb
   candidates (ID-reference wins); absorb keeps handling semantic distillation
   of everything else.
