@@ -218,6 +218,31 @@ test("buildStoredPlaceholder falls back to head when no command; byte-stable", (
   assert.ok(isStoredPlaceholderText(first));
 });
 
+test("stored placeholder round-trips with a widened ref beyond the old cap (#483)", () => {
+  const placeholder = buildStoredPlaceholder({
+    ref: "m100000",
+    kind: "shell output",
+    tokens: 1234567,
+    head: "wide preview",
+    command: "npm test",
+    retrieveToolName: "acp_retrieve",
+  });
+  assert.ok(isStoredPlaceholderText(placeholder));
+  const parsed = parseStoredPlaceholder(placeholder);
+  assert.ok(parsed);
+  assert.equal(parsed!.ref, "m100000");
+  assert.equal(parsed!.tokens, 1234567);
+  // Sub-cap refs still round-trip byte-for-byte (no regression).
+  const legacy = buildStoredPlaceholder({
+    ref: "m00423",
+    kind: "file read",
+    tokens: 4213,
+    head: "p",
+    retrieveToolName: "acp_retrieve",
+  });
+  assert.equal(parseStoredPlaceholder(legacy)!.ref, "m00423");
+});
+
 test("classifyKind maps common tools and defaults to 'tool result'", () => {
   assert.equal(classifyKind("bash"), "shell output");
   assert.equal(classifyKind("Bash"), "shell output");

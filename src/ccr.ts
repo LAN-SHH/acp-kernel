@@ -181,15 +181,22 @@ export interface ParsedStoredPlaceholder {
   title?: string;
 }
 
-// Strict whole-body grammar of buildStoredPlaceholder output. Refs are always
-// 5-digit zero-padded (refs.ts REF_WIDTH); tokens use groupThousands grouping
-// (no leading zeros, comma groups); both lines cite the same ref. A bare
-// substring mention of "[acp-stored" anywhere in larger text matches NOTHING
-// here (billion-context#1456).
+// Strict whole-body grammar of buildStoredPlaceholder output. Refs are
+// CANONICAL renderings only: zero-padded 5-digit form below 100,000 ("m00423",
+// refs.ts REF_WIDTH floor) or natural width above ("m100000" … "m9999999",
+// acp-kernel#483) — a widened ref NEVER carries a leading zero, so forms like
+// "m004234" stay rejected and ordinary text embedding near-examples keeps
+// matching NOTHING here (billion-context#1456). Tokens use groupThousands
+// grouping (no leading zeros, comma groups); both lines cite the same ref.
+const CANONICAL_REF = "m(?:\\d{5}|[1-9]\\d{5,6})";
 const PLACEHOLDER_LINE1_RE = new RegExp(
-  "^📦 \\[acp-stored #(m\\d{5}) · (.+?) · (0|[1-9]\\d{0,2}(?:,\\d{3})*) tok\\](?: `(.+)`)?$",
+  "^📦 \\[acp-stored #(" +
+    CANONICAL_REF +
+    ") · (.+?) · (0|[1-9]\\d{0,2}(?:,\\d{3})*) tok\\](?: `(.+)`)?$",
 );
-const PLACEHOLDER_LINE2_RE = /^   → (.+?)\("(m\d{5})"\) returns the full text$/;
+const PLACEHOLDER_LINE2_RE = new RegExp(
+  "^   → (.+?)\\(" + '"(' + CANONICAL_REF + ')"' + "\\) returns the full text$",
+);
 
 /** Parse a WHOLE-BODY canonical CCR placeholder; null otherwise.
  *

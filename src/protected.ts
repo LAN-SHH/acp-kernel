@@ -74,11 +74,18 @@ export function isNeverPreserveRecent(
   return false;
 }
 
+/** Match a tool name against a pattern: an exact name or a trailing-`*` prefix
+ *  glob. CASE-INSENSITIVE on both sides — client hosts disagree on tool-name
+ *  casing (opencode `read` vs Claude/ZCode `Read`), so every knob built on this
+ *  matcher must treat them as equal (billion-context#1725). Monotonic: only adds
+ *  matches, never removes one that held under exact matching. */
 export function matchToolPattern(toolName: string, pattern: string): boolean {
-  if (pattern.endsWith("*")) {
-    return toolName.startsWith(pattern.slice(0, -1));
+  const name = toolName.toLowerCase();
+  const pat = pattern.toLowerCase();
+  if (pat.endsWith("*")) {
+    return name.startsWith(pat.slice(0, -1));
   }
-  return toolName === pattern;
+  return name === pat;
 }
 
 export function isMessageProtected(

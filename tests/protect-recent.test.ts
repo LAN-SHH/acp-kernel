@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createCore } from "../src/compress.js";
 import { createInitialState } from "../src/state.js";
 import { assignRefs } from "../src/refs.js";
-import { isNeverPreserveRecent } from "../src/protected.js";
+import { isNeverPreserveRecent, matchToolPattern } from "../src/protected.js";
 import { defaultConfig, validateConfig } from "../src/config.js";
 import type { Config, CoreMessage } from "../src/types.js";
 
@@ -763,5 +763,90 @@ test("validateConfig checks preserveRecentTools shape and accepts []", () => {
   assert.ok(
     !validateConfig(empty).some((e) => /preserveRecentTools/.test(e)),
     "empty array is a tolerated no-op",
+  );
+});
+
+// --- case-insensitive tool-name matching across client casings (billion-context#1725) ---
+
+test("matchToolPattern is case-insensitive for exact names", () => {
+  assert.equal(
+    matchToolPattern("read", "read"),
+    true,
+    "exact-case still matches",
+  );
+  assert.equal(matchToolPattern("Read", "read"), true, "tool casing differs");
+  assert.equal(
+    matchToolPattern("read", "READ"),
+    true,
+    "pattern casing differs",
+  );
+  assert.equal(matchToolPattern("BASH", "bash"), true);
+  assert.equal(
+    matchToolPattern("Grep", "read"),
+    false,
+    "different name still no match",
+  );
+});
+
+test("matchToolPattern is case-insensitive for trailing-* glob prefixes", () => {
+  assert.equal(matchToolPattern("ReadFile", "read*"), true);
+  assert.equal(matchToolPattern("READ_FILE", "read*"), true);
+  assert.equal(matchToolPattern("search_context", "SEARCH*"), true);
+  assert.equal(matchToolPattern("write_file", "read*"), false);
+});
+
+test("isNeverPreserveRecent excludes capitalized built-in results by default (#1725)", () => {
+  // Before the fix these all returned false (results stuck in the protected zone).
+  assert.equal(
+    isNeverPreserveRecent(toolResult("a", "Read", "body")),
+    true,
+    "Read excluded by default",
+  );
+  assert.equal(
+    isNeverPreserveRecent(toolResult("b", "Bash", "out")),
+    true,
+    "Bash excluded by default",
+  );
+  assert.equal(isNeverPreserveRecent(toolResult("c", "DECOMPRESS", "x")), true);
+  assert.equal(
+    isNeverPreserveRecent(toolResult("d", "grep", "hits")),
+    false,
+    "non-listed tool unaffected",
+  );
+});
+
+test("preserveRecentTools subtraction works regardless of casing (#1725)", () => {
+  const readMsg = toolResult("a", "Read", "body");
+  assert.equal(
+    isNeverPreserveRecent(readMsg),
+    true,
+    "Read excluded by default",
+  );
+  // Before the fix this override was a silent no-op for a differently-cased name.
+  assert.equal(
+    isNeverPreserveRecent(readMsg, undefined, ["READ"]),
+    false,
+    'preserve ["READ"] re-protects the Read result',
+  );
+});
+
+test("computeProtectedRefs keeps a fresh capitalized Read result compressible (#1725)", async () => {
+  const { computeProtectedRefs } = await import("../src/recommend.js");
+  const messages: CoreMessage[] = [
+    msg("a", "old alpha", "user"),
+    msg("b", "old beta", "assistant"),
+    msg("c", "old gamma", "user"),
+    toolResult("d", "Read", "x".repeat(20000)),
+    msg("e", "latest user intent", "user"),
+  ];
+  const state = seededState(messages);
+  const refs = computeProtectedRefs(
+    messages,
+    state,
+    config({ preserveRecentMessages: 3 }),
+  );
+  assert.ok(
+    !refs.has("m00004"),
+    "capitalized Read result stays outside the protected recent zone by default",
   );
 });
