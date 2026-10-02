@@ -1,9 +1,14 @@
 import type { CoreMessage, MessageRefMap } from "./types.js";
 
+// Ref tags render zero-padded to REF_WIDTH digits up to 99,999 ("m00001");
+// above that they widen naturally ("m100000" … "m9999999") so every tag ever
+// issued below the old cap stays byte-identical while the ceiling lifts
+// (acp-kernel#483, the #191-sanctioned fix). REF_WIDTH is a padding floor,
+// not a fixed width — indexToRef's padStart is a no-op for indices ≥ 10^5.
 const REF_WIDTH = 5;
 const MIN_INDEX = 1;
-const MAX_INDEX = 99999;
-const REF_PATTERN = /^m0*(\d{1,5})$/;
+const MAX_INDEX = 9_999_999;
+const REF_PATTERN = /^m0*(\d{1,7})$/;
 
 export const BLOCKED_REF = "BLOCKED";
 

@@ -17,7 +17,7 @@ export interface ParsedBoundary {
   raw: string;
 }
 
-const MESSAGE_REF_PATTERN = /^m0*(\d{1,5})$/;
+const MESSAGE_REF_PATTERN = /^m0*(\d{1,7})$/;
 const BLOCK_REF_PATTERN = /^b(\d{1,9})$/;
 
 export function parseBoundary(ref: string): ParsedBoundary | null {
@@ -25,7 +25,7 @@ export function parseBoundary(ref: string): ParsedBoundary | null {
   const messageMatch = MESSAGE_REF_PATTERN.exec(normalized);
   if (messageMatch) {
     const numericId = Number(messageMatch[1]);
-    if (numericId >= 1 && numericId <= 99999) {
+    if (numericId >= 1 && numericId <= 9_999_999) {
       return { kind: "message", numericId, raw: normalized };
     }
   }
@@ -358,6 +358,7 @@ function snapToNeighborVisible(
 }
 
 function formatPaddedRef(index: number): string {
+  // Pad floor of 5 (refs.ts REF_WIDTH): no-op for widened indices ≥ 10^5.
   return `m${String(index).padStart(5, "0")}`;
 }
 

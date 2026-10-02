@@ -970,7 +970,9 @@ test("invalid refs are reported per-range without failing the batch", () => {
 
   const result = core.applyCompression({
     ranges: [
-      { startRef: "m999999", endRef: "m00002", summary: "bad ref" },
+      // Over the widened cap (9,999,999) → invalid shape, reported per-range.
+      // (m999999 was the pre-#483 out-of-range sentinel; it is a valid ref now.)
+      { startRef: "m10000000", endRef: "m00002", summary: "bad ref" },
       { startRef: "m00001", endRef: "m00002", summary: "good summary" },
     ],
     messages,
@@ -982,7 +984,7 @@ test("invalid refs are reported per-range without failing the batch", () => {
   assert.equal(result.result.errors.length, 1);
   assert.match(
     result.result.errors[0]!,
-    /^range m999999\.\.m00002: Invalid boundary ref/,
+    /^range m10000000\.\.m00002: Invalid boundary ref/,
   );
 });
 
