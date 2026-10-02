@@ -15,6 +15,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import * as path from "node:path";
 import type { Prompts } from "./prompts.js";
+import { LANGUAGE_PRESERVATION_RULE } from "./compression-rules.js";
 import type { CompressPromptSections, ToolPrompts } from "./surface-config.js";
 import type { NudgePromptSections } from "./nudge-text.js";
 
@@ -217,6 +218,8 @@ const LEAN_TOOL_PROMPTS: ToolPrompts = {
 export const LEAN_HOW_TO_COMPRESS = `HOW TO COMPRESS
 
 Your summary is the ONLY record of the replaced conversation — a later reader must continue without the original. It records the PAST: label task state as history ("TASK AS OF THIS BLOCK: ..."), never as a live instruction. Real unicode only, never \\uXXXX escapes.
+
+${LANGUAGE_PRESERVATION_RULE}
 
 INTEGRITY — record facts and state only, never a simulated transcript of the dialogue: no Q&A lists, no "(answered)" claims. An answer not actually sent is PENDING; user questions are recorded as asked (with ref), never as answered.
 

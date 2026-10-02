@@ -97,14 +97,16 @@ test("lean carries a condensed how-to-compress style contract in the pi slot", (
   };
   const howTo = pi.promptSections.howToCompress ?? "";
   assert.ok(
-    howTo.length > 800 && howTo.length < 3100,
-    `condensed, not full (len=${howTo.length}; ceiling raised for the #442 open-objectives rule)`,
+    howTo.length > 800 && howTo.length < 3400,
+    `condensed, not full (len=${howTo.length}; ceiling raised for the #493 language rule and #442 open-objectives rule)`,
   );
   for (const marker of [
     "TASK AS OF THIS BLOCK",
     "PENDING",
     "no Q&A lists",
     "KEEP VERBATIM",
+    "Preserve the source conversation's primary language",
+    "Do not translate a monolingual conversation without a user request",
     "chose X over Y because Z",
     "PRIORITY",
     "Do not mimic",

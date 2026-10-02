@@ -4,6 +4,7 @@ import { defaultPrompts, resolvePrompts } from "../src/prompts.js";
 import { renderNudgeText } from "../src/nudge-text.js";
 import {
   COMPRESS_PHILOSOPHY,
+  LANGUAGE_PRESERVATION_RULE,
   HOW_TO_COMPRESS_RULES,
   TIER2_DISTILL_RULES,
   TIER3_CONDENSE_RULES,
@@ -38,6 +39,28 @@ test("defaultPrompts mirrors the verbatim rule constants", () => {
   assert.equal(defaultPrompts.howToCompressRules, HOW_TO_COMPRESS_RULES);
   assert.equal(defaultPrompts.tier2DistillRules, TIER2_DISTILL_RULES);
   assert.equal(defaultPrompts.tier3CondenseRules, TIER3_CONDENSE_RULES);
+});
+
+test("default compression rules preserve the source conversation language", () => {
+  for (const rules of [
+    COMPRESS_PHILOSOPHY,
+    HOW_TO_COMPRESS_RULES,
+    TIER2_DISTILL_RULES,
+    TIER3_CONDENSE_RULES,
+  ]) {
+    assert.ok(rules.includes(LANGUAGE_PRESERVATION_RULE));
+  }
+
+  for (const decision of [
+    makeDecision(),
+    makeDecision({ contextUsage: 0.99, breakdown: { emergencyOverride: 1 } }),
+    makeDecision({ tier: 2 }),
+    makeDecision({ tier: 3 }),
+  ]) {
+    assert.ok(
+      renderNudgeText(decision).text.includes(LANGUAGE_PRESERVATION_RULE),
+    );
+  }
 });
 
 test("resolvePrompts with no overrides returns the defaults", () => {

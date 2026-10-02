@@ -15,8 +15,12 @@
  * in summaries. Quotes stay historical; open-objective STATUS is current.
  */
 
+export const LANGUAGE_PRESERVATION_RULE =
+  "Preserve the source conversation's primary language. Do not translate a monolingual conversation without a user request. For mixed-language source, preserve each segment's language. Keep code, commands, identifiers, and quoted text verbatim when the tier's fidelity rules retain them.";
+
 export const COMPRESS_PHILOSOPHY = `Compression Philosophy:
 - All compression serves the primary task, but be frugal.
+- ${LANGUAGE_PRESERVATION_RULE}
 - Context capacity is precious. Save context by compressing consumed outputs, not by avoiding tools.
 - Compress by need, not by percentage.
 - Work from summaries, not raw tool outputs. All listed ranges (user prompts, tool outputs, code, logs, exploration, intermediate steps) should be compressed to summary format — the ONLY exceptions are protected content, content the current step is actively using, or critical content you cannot reconstruct.`;
@@ -24,6 +28,8 @@ export const COMPRESS_PHILOSOPHY = `Compression Philosophy:
 export const HOW_TO_COMPRESS_RULES = `HOW TO COMPRESS
 
 When you call \`compress\`, the summary you write becomes the only record of the replaced conversation. Make it self-contained and complete: every user request, experiment purpose, and work task in the range must be accurately captured. A later reader (or you, after decompressing) should be able to continue the task WITHOUT needing the original. The summary records the PAST as of this block's creation: label recorded task state as history ("TASK AS OF THIS BLOCK: ...") — never as a live instruction, so a later reader treats it as settled context, not something to re-execute. Write plain text with real unicode characters; never copy \\uXXXX escape sequences or JSON-escaped fragments out of tool output.
+
+${LANGUAGE_PRESERVATION_RULE}
 
 KEEP VERBATIM — never paraphrase or abbreviate these:
 - Full file paths with line numbers, directory prefix on every mention (\`lib/hooks.ts:347\`, \`src/index.ts:12-18\`, \`gatenet_v3/model.py:45\`). Never abbreviate to a bare filename (\`hooks.ts\`, \`model.py\`) — they are ambiguous and cannot be grepped or decompressed-to later.
@@ -63,6 +69,8 @@ export const TIER2_DISTILL_RULES = `TIER 2 COMPRESSION — DISTILLATION
 
 You are compressing historical summaries (not raw conversation). These summaries have already captured the details. Your job is to DISTILL them: extract only what matters for future work, discard the process.
 
+${LANGUAGE_PRESERVATION_RULE}
+
 KEEP — these are the only things that survive distillation:
 - Decisions and their rationale ("chose X over Y because Z" — the "because" is load-bearing).
 - Final outcomes: version numbers shipped, PR numbers merged/closed, bugs fixed or deferred.
@@ -95,6 +103,8 @@ SIZE TARGET: 50-150 tokens per source block (excluding the header). If you can't
 export const TIER3_CONDENSE_RULES = `TIER 3 COMPRESSION — ULTRA-CONDENSATION
 
 You are compressing distilled summaries (Tier 2) into ultra-condensed facts (Tier 3). The distilled summaries already contain only decisions and outcomes. Your job is to reduce them to bare factual references.
+
+${LANGUAGE_PRESERVATION_RULE}
 
 PRIORITY — when a source block has more facts than the size target allows, keep in this order:
 1. Shipped outcomes (versions released, PRs merged) — these are permanent record.
