@@ -9,6 +9,7 @@ import {
   defaultPack,
   leanPack,
   LEAN_HOW_TO_COMPRESS,
+  leanHowToCompress,
   HOW_TO_COMPRESS_RULES,
   TIER2_DISTILL_RULES,
   TIER3_CONDENSE_RULES,
@@ -97,16 +98,14 @@ test("lean carries a condensed how-to-compress style contract in the pi slot", (
   };
   const howTo = pi.promptSections.howToCompress ?? "";
   assert.ok(
-    howTo.length > 800 && howTo.length < 3400,
-    `condensed, not full (len=${howTo.length}; ceiling raised for the #493 language rule and #442 open-objectives rule)`,
+    howTo.length > 800 && howTo.length < 3100,
+    `condensed, not full (len=${howTo.length}; ceiling raised for the #442 open-objectives rule)`,
   );
   for (const marker of [
     "TASK AS OF THIS BLOCK",
     "PENDING",
     "no Q&A lists",
     "KEEP VERBATIM",
-    "Preserve the source conversation's primary language",
-    "Do not translate a monolingual conversation without a user request",
     "chose X over Y because Z",
     "PRIORITY",
     "Do not mimic",
@@ -505,5 +504,30 @@ test("summaries-in-context guardrails carve out Open objectives as live tasking 
       'A summary\'s "Open objectives:" line names still-open user requests',
     ),
     "lean acpTags guardrail keeps the live-tasking exception",
+  );
+});
+
+test("lean how-to-compress keeps the language rule opt-in (#493)", () => {
+  // Default: byte-identical base text, rule absent from the builtin surface.
+  assert.equal(leanHowToCompress(), LEAN_HOW_TO_COMPRESS);
+  assert.ok(
+    !LEAN_HOW_TO_COMPRESS.includes(
+      "Preserve the source conversation's primary language",
+    ),
+  );
+  const pi = leanPack.surface.adapters?.pi as {
+    promptSections: Record<string, string | null>;
+  };
+  assert.equal(pi.promptSections.howToCompress, LEAN_HOW_TO_COMPRESS);
+  // Opt-in: append-only, both rule needles present.
+  const withRule = leanHowToCompress(true);
+  assert.ok(withRule.startsWith(LEAN_HOW_TO_COMPRESS));
+  assert.ok(
+    withRule.includes("Preserve the source conversation's primary language"),
+  );
+  assert.ok(
+    withRule.includes(
+      "Do not translate a monolingual conversation without a user request",
+    ),
   );
 });
